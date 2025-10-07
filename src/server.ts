@@ -1,88 +1,81 @@
 import express, { Request, Response, NextFunction } from 'express';
 import dotenv from 'dotenv';
-import { getSalesforceConnection } from './salesforce-client';
-import { toolRegistry, findTool } from './tool-registry';
+import { toolRegistry } from './tool-registry';
+import { Tool } from './models';
 
 // Carica le variabili d'ambiente dal file .env
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const API_SECRET = process.env.API_SECRET;
+const port = process.env.PORT || 3000;
+const secretToken = process.env.SECRET_TOKEN;
 
-// Middleware per il parsing del corpo delle richieste in JSON
+// Middleware per il parsing del body JSON
 app.use(express.json());
 
-// Middleware per l'autenticazione basata su API Key
-const apiKeyAuth = (req: Request, res: Response, next: NextFunction) => {
-    if (!API_SECRET) {
-        // Se non è richiesta alcuna chiave API, procedi
+// Middleware per l'autenticazione
+const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
+    if (!secretToken) {
+        // Se il token non è configurato, si prosegue senza autenticazione (utile per test locali veloci)
+        console.warn("Nessun SECRET_TOKEN configurato. L'autenticazione è disabilitata.");
         return next();
     }
-    const apiKey = req.headers['x-api-key'];
-    if (apiKey && apiKey === API_SECRET) {
-        next();
-    } else {
-        res.status(401).json({ error: 'Unauthorized: Invalid API Key' });
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Autorizzazione mancante o malformata.' });
     }
+
+    const token = authHeader.split(' ')[1];
+    if (token !== secretToken) {
+        return res.status(403).json({ error: 'Token non valido.' });
+    }
+
+    next();
 };
 
-// Endpoint di Health Check per verificare che il server sia attivo
-app.get('/health', (req: Request, res: Response) => {
-    res.status(200).json({ status: 'healthy' });
+// Endpoint di stato (non protetto)
+app.get('/status', (req: Request, res: Response) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// --- ENDPOINTS MCP ---
-
-// 1. Endpoint di Scoperta (`GET /tools`)
-// Restituisce la lista di tutti gli strumenti disponibili nel registro.
-app.get('/tools', apiKeyAuth, (req: Request, res: Response) => {
-    // Mappiamo il registro per restituire solo le informazioni pubbliche
-    const availableTools = toolRegistry.map(({ name, description, schema }) => ({
-        name,
-        description,
-        schema
+// Endpoint di scoperta degli strumenti (protetto)
+app.get('/tools', authMiddleware, (req: Request, res: Response) => {
+    // Restituisce solo la definizione degli strumenti (nome, descrizione, schema)
+    const toolDefinitions = Object.values(toolRegistry).map(tool => ({
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters
     }));
-    res.status(200).json(availableTools);
+    res.json(toolDefinitions);
 });
 
-// 2. Endpoint di Esecuzione (`POST /tools/:toolName`)
-// Esegue uno strumento specifico.
-app.post('/tools/:toolName', apiKeyAuth, async (req: Request, res: Response) => {
+// Endpoint per l'esecuzione di uno strumento (protetto)
+app.post('/tools/:toolName', authMiddleware, async (req: Request, res: Response) => {
     const { toolName } = req.params;
-    const params = req.body;
-
-    // Cerca lo strumento nel registro
-    const tool = findTool(toolName);
+    const tool = toolRegistry[toolName];
 
     if (!tool) {
-        return res.status(404).json({ error: `Tool '${toolName}' not found.` });
+        return res.status(404).json({ error: `Strumento '${toolName}' non trovato.` });
     }
 
     try {
-        console.log(`Esecuzione dello strumento '${toolName}' con i parametri:`, params);
-        
-        // Stabilisce la connessione a Salesforce
-        const conn = await getSalesforceConnection();
-        
-        // Esegue la funzione associata allo strumento
-        const result = await tool.execute(conn, params);
-        
-        console.log(`Strumento '${toolName}' eseguito con successo.`);
-        res.status(200).json({ success: true, result });
-
+        console.log(`Esecuzione dello strumento '${toolName}' con i parametri:`, req.body);
+        const result = await tool.execute(req.body);
+        console.log(`Risultato dello strumento '${toolName}':`, result);
+        return res.json({ result });
     } catch (error: any) {
         console.error(`Errore durante l'esecuzione dello strumento '${toolName}':`, error);
-        res.status(500).json({ 
-            success: false, 
-            error: error.message || 'An unexpected error occurred.',
-            details: error.stack // Includi stack trace per debug
+        // Restituisce un errore più dettagliato
+        return res.status(500).json({ 
+            error: `Errore nell'esecuzione dello strumento '${toolName}'.`,
+            details: error.message || 'Errore sconosciuto'
         });
     }
 });
 
-
-// Avvio del server
-app.listen(PORT, () => {
-    console.log(`🚀 Server MCP per Salesforce in esecuzione su http://localhost:${PORT}`);
+// Avvia il server
+app.listen(port, () => {
+    console.log(`Server MCP in ascolto sulla porta ${port}`);
 });
+
