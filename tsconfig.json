@@ -1,16 +1,15 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
-    "module": "commonjs",
-    "rootDir": "./src",
-    "outDir": "./dist",
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "strict": true,
-    "skipLibCheck": true,
-    "typeRoots": ["./node_modules/@types", "./src/types"]
+    "target": "ES2020",                       /* Specifica la versione di ECMAScript di destinazione */
+    "module": "commonjs",                    /* Specifica la generazione del modulo: 'commonjs' per Node.js */
+    "rootDir": "./src",                      /* Specifica la directory principale dei file di input TypeScript */
+    "outDir": "./dist",                      /* Specifica la directory di output per i file JavaScript compilati */
+    "esModuleInterop": true,                 /* Abilita l'interoperabilità tra CommonJS e moduli ES */
+    "forceConsistentCasingInFileNames": true, /* Garantisce che i riferimenti ai file abbiano un casing consistente */
+    "strict": true,                          /* Abilita tutte le opzioni di controllo dei tipi stretto */
+    "skipLibCheck": true,                    /* Salta il controllo dei tipi per i file di dichiarazione (.d.ts) */
+    "resolveJsonModule": true                /* Permette di importare file .json come moduli */
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules"]
+  "include": ["src/**/*"],                   /* Specifica quali file TypeScript includere nella compilazione */
+  "exclude": ["node_modules"]                /* Specifica quali file e cartelle escludere */
 }
-
