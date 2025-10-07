@@ -1,21 +1,30 @@
 {
   "name": "mcp-server-salesforce-ts",
   "version": "1.0.0",
-  "description": "Server MCP conforme per Salesforce, costruito con TypeScript ed Express.",
+  "description": "Server MCP conforme per Salesforce in TypeScript",
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts"
   },
-  "author": "AI Assistant",
-  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "salesforce",
+    "n8n",
+    "ai",
+    "typescript"
+  ],
+  "author": "",
+  "license": "ISC",
   "dependencies": {
+    "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "jsforce": "^1.11.1"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/jsforce": "^1.11.0",
     "@types/node": "^20.12.12",

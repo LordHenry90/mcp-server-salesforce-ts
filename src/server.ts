@@ -1,81 +1,72 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express from 'express';
+import cors from 'cors';
 import dotenv from 'dotenv';
 import { toolRegistry } from './tool-registry';
-import { Tool } from './models';
+import { PublicTool } from './models'; // Importa la nuova interfaccia PublicTool
 
 // Carica le variabili d'ambiente dal file .env
 dotenv.config();
 
 const app = express();
-const port = process.env.PORT || 3000;
-const secretToken = process.env.SECRET_TOKEN;
+const PORT = process.env.PORT || 3000;
 
-// Middleware per il parsing del body JSON
+// Middleware
+app.use(cors());
 app.use(express.json());
 
-// Middleware per l'autenticazione
-const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
-    if (!secretToken) {
-        // Se il token non è configurato, si prosegue senza autenticazione (utile per test locali veloci)
-        console.warn("Nessun SECRET_TOKEN configurato. L'autenticazione è disabilitata.");
-        return next();
+// Middleware di autenticazione
+const authMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (token && token === process.env.SECRET_TOKEN) {
+        next();
+    } else {
+        res.status(401).json({ error: "Token non valido o mancante" });
     }
-
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ error: 'Autorizzazione mancante o malformata.' });
-    }
-
-    const token = authHeader.split(' ')[1];
-    if (token !== secretToken) {
-        return res.status(403).json({ error: 'Token non valido.' });
-    }
-
-    next();
 };
 
-// Endpoint di stato (non protetto)
-app.get('/status', (req: Request, res: Response) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-// Endpoint di scoperta degli strumenti (protetto)
-app.get('/tools', authMiddleware, (req: Request, res: Response) => {
-    // Restituisce solo la definizione degli strumenti (nome, descrizione, schema)
-    const toolDefinitions = Object.values(toolRegistry).map(tool => ({
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.parameters
+// Endpoint di scoperta degli strumenti conforme alle aspettative del nodo MCP Client
+app.get('/mcp', authMiddleware, (req, res) => {
+    console.log("Richiesta di scoperta strumenti ricevuta su /mcp");
+    // Ora usiamo l'interfaccia PublicTool per garantire la correttezza dei tipi
+    const toolList: PublicTool[] = Object.values(toolRegistry).map(t => ({
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters
+        // La funzione 'execute' viene volutamente omessa
     }));
-    res.json(toolDefinitions);
+    res.json(toolList);
 });
 
-// Endpoint per l'esecuzione di uno strumento (protetto)
-app.post('/tools/:toolName', authMiddleware, async (req: Request, res: Response) => {
+// Endpoint di esecuzione degli strumenti conforme
+app.post('/mcp/:toolName', authMiddleware, async (req, res) => {
     const { toolName } = req.params;
     const tool = toolRegistry[toolName];
+
+    console.log(`Esecuzione richiesta per lo strumento: ${toolName}`);
 
     if (!tool) {
         return res.status(404).json({ error: `Strumento '${toolName}' non trovato.` });
     }
 
     try {
-        console.log(`Esecuzione dello strumento '${toolName}' con i parametri:`, req.body);
         const result = await tool.execute(req.body);
-        console.log(`Risultato dello strumento '${toolName}':`, result);
-        return res.json({ result });
+        res.json({ result });
     } catch (error: any) {
-        console.error(`Errore durante l'esecuzione dello strumento '${toolName}':`, error);
-        // Restituisce un errore più dettagliato
-        return res.status(500).json({ 
+        console.error(`Errore durante l'esecuzione dello strumento ${toolName}:`, error);
+        res.status(500).json({ 
             error: `Errore nell'esecuzione dello strumento '${toolName}'.`,
-            details: error.message || 'Errore sconosciuto'
+            details: error.message || String(error)
         });
     }
 });
 
-// Avvia il server
-app.listen(port, () => {
-    console.log(`Server MCP in ascolto sulla porta ${port}`);
+// Endpoint di health check per Railway
+app.get('/health', (req, res) => {
+    res.status(200).send('OK');
+});
+
+app.listen(PORT, () => {
+    console.log(`Server MCP conforme in ascolto sulla porta ${PORT}`);
+    console.log(`Endpoint di scoperta strumenti: http://localhost:${PORT}/mcp`);
 });
 
