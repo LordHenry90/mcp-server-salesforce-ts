@@ -42,7 +42,7 @@ export const toolRegistry: ToolRegistry = {
                 objectApiName: { type: 'string', description: "Il nome API dell'oggetto a cui aggiungere il campo (es. 'Account' o 'Prodotto__c')." },
                 fieldApiName: { type: 'string', description: "Il nome API del campo (es. 'Codice_Prodotto'). Non includere '__c'." },
                 label: { type: 'string', description: "L'etichetta del campo." },
-                type: { type: 'string', enum: ['Text', 'Number', 'Date', 'Checkbox'], description: "Il tipo di dato del campo." },
+                type: { type: 'string', enum: ['Text', 'Number', 'Date', 'Checkbox', 'LongTextArea'], description: "Il tipo di dato del campo." },
                 length: { type: 'number', description: "La lunghezza del campo (obbligatorio per il tipo 'Text')." }
             },
             required: ['objectApiName', 'fieldApiName', 'label', 'type']
@@ -69,6 +69,47 @@ export const toolRegistry: ToolRegistry = {
             return sfdc.createApexClass(conn, params);
         }
     },
-    // Aggiungi qui gli altri strumenti (createLWC, updateFieldPermissions) con la stessa struttura...
+    createLWC: {
+        name: 'createLWC',
+        description: 'Crea un nuovo Lightning Web Component (LWC) in Salesforce. Richiede i contenuti dei file HTML e JS.',
+        parameters: {
+            type: 'object',
+            properties: {
+                componentName: { type: 'string', description: "Il nome API del componente in camelCase (es. 'myContactList')." },
+                masterLabel: { type: 'string', description: "L'etichetta visibile del componente (es. 'My Contact List')." },
+                isExposed: { type: 'boolean', description: "Impostare a 'true' per rendere il componente visibile nel Lightning App Builder." },
+                targets: { 
+                    type: 'array', 
+                    items: { type: 'string' },
+                    description: "Un array di target dove il componente può essere usato (es. ['lightning__AppPage', 'lightning__RecordPage'])."
+                },
+                htmlContent: { type: 'string', description: "Il contenuto completo del file .html del componente." },
+                jsContent: { type: 'string', description: "Il contenuto completo del file .js del componente." }
+            },
+            required: ['componentName', 'masterLabel', 'isExposed', 'targets', 'htmlContent', 'jsContent']
+        },
+        execute: async (params: CreateLWCRequest) => {
+            const conn = await sfdc.getSalesforceConnection();
+            return sfdc.createLWC(conn, params);
+        }
+    },
+    updateFieldPermissions: {
+        name: 'updateFieldPermissions',
+        description: "Aggiorna i permessi di un campo specifico (lettura/scrittura) per un profilo Salesforce.",
+        parameters: {
+            type: 'object',
+            properties: {
+                profileName: { type: 'string', description: "Il nome del profilo da modificare (es. 'System Administrator')." },
+                fieldApiName: { type: 'string', description: "Il nome API completo del campo (es. 'Account.MyCustomField__c')." },
+                editable: { type: 'boolean', description: "Impostare a 'true' per rendere il campo modificabile." },
+                readable: { type: 'boolean', description: "Impostare a 'true' per rendere il campo visibile." }
+            },
+            required: ['profileName', 'fieldApiName', 'editable', 'readable']
+        },
+        execute: async (params: UpdatePermissionsRequest) => {
+            const conn = await sfdc.getSalesforceConnection();
+            return sfdc.updateFieldPermissions(conn, params);
+        }
+    }
 };
 
