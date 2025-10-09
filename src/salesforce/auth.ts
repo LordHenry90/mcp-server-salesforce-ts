@@ -3,7 +3,7 @@ import axios from 'axios';
 import { SalesforceCredentials } from '../models';
 import qs from 'querystring';
 
-// Cache in-memory per l'access token per evitare di richiederlo ad ogni chiamata
+// Cache in-memory per l'access token
 let tokenCache = {
     accessToken: '',
     instanceUrl: '',
@@ -13,7 +13,6 @@ let tokenCache = {
 export async function getAccessToken(creds: SalesforceCredentials): Promise<{ accessToken: string, instanceUrl: string }> {
     const now = Math.floor(Date.now() / 1000);
 
-    // Se abbiamo un token valido in cache, usiamo quello
     if (tokenCache.accessToken && now < tokenCache.expiresAt) {
         console.log("Access token recuperato dalla cache.");
         return {
@@ -24,17 +23,22 @@ export async function getAccessToken(creds: SalesforceCredentials): Promise<{ ac
 
     console.log("Nessun token valido in cache, richiesta di un nuovo token a Salesforce.");
 
-    // 1. Creare il JWT
+    // --- INIZIO MODIFICA FONDAMENTALE ---
+    // Decodifica la chiave privata da Base64 per ricostruire il formato PEM corretto.
+    // Questo è il passaggio chiave per risolvere l'errore di firma.
+    const decodedPrivateKey = Buffer.from(creds.privateKey, 'base64').toString('utf-8');
+    // --- FINE MODIFICA FONDAMENTALE ---
+
     const payload = {
         iss: creds.consumerKey,
         sub: creds.username,
         aud: creds.loginUrl,
-        exp: now + (3 * 60) // Il token scade tra 3 minuti
+        exp: now + (3 * 60)
     };
 
-    const signedJwt = jwt.sign(payload, creds.privateKey, { algorithm: 'RS256' });
+    // Usa la chiave decodificata per firmare il JWT
+    const signedJwt = jwt.sign(payload, decodedPrivateKey, { algorithm: 'RS256' });
 
-    // 2. Scambiare il JWT per un Access Token
     const tokenUrl = new URL('/services/oauth2/token', creds.loginUrl).toString();
     
     try {
@@ -47,11 +51,10 @@ export async function getAccessToken(creds: SalesforceCredentials): Promise<{ ac
 
         const { access_token, instance_url } = response.data;
         
-        // Aggiorniamo la cache
         tokenCache = {
             accessToken: access_token,
             instanceUrl: instance_url,
-            expiresAt: now + (60 * 60 * 1) // Imposta la scadenza a 1 ora da adesso
+            expiresAt: now + (60 * 60 * 1)
         };
 
         console.log("Nuovo access token ottenuto e salvato in cache.");
@@ -64,3 +67,4 @@ export async function getAccessToken(creds: SalesforceCredentials): Promise<{ ac
         throw new Error(`Autenticazione Salesforce fallita: ${error.response?.data?.error_description || error.message}`);
     }
 }
+
