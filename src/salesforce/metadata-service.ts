@@ -32,7 +32,7 @@ export class MetadataService {
      * 5. Viene avviato un deploy asincrono del container.
      * 6. Lo stato del deploy viene monitorato (polling) fino al completamento.
      * 7. Il container temporaneo viene sempre cancellato, sia in caso di successo che di fallimento.
-     * * @param {CreateApexClassRequest} params I parametri per la creazione/aggiornamento della classe Apex.
+     * @param {CreateApexClassRequest} params I parametri per la creazione/aggiornamento della classe Apex.
      * @throws {Error} Se i parametri richiesti (`className`, `body`) sono mancanti.
      * @throws {Error} Se il deploy fallisce.
      * @returns {Promise<any>} Un oggetto che indica il successo e un messaggio descrittivo.
@@ -82,9 +82,12 @@ export class MetadataService {
             });
 
             // Passo 4: Attendi il completamento del deploy tramite polling.
+            // Questo è il passaggio cruciale per risolvere la "race condition".
+            // La funzione non restituirà il controllo finché il deploy non sarà finalizzato.
             const deployResult = await this.pollDeployStatus(deployRequest.id);
 
             if (deployResult.State !== 'Completed') {
+                // Se il deploy fallisce, costruiamo un messaggio di errore dettagliato.
                 const errorDetails = deployResult.DeployDetails?.componentFailures ? 
                                      JSON.stringify(deployResult.DeployDetails.componentFailures) : 
                                      deployResult.ErrorMsg || 'Nessun dettaglio disponibile.';
@@ -104,7 +107,7 @@ export class MetadataService {
      * Crea o aggiorna un Lightning Web Component (LWC).
      * Questo metodo orchestra il complesso processo di deploy di un LWC, che richiede
      * la gestione di un container di metadati e la creazione sequenziale di più risorse.
-     * * @param {CreateLWCRequest} params I parametri completi per la creazione del LWC.
+     * @param {CreateLWCRequest} params I parametri completi per la creazione del LWC.
      * @throws {Error} Se i parametri richiesti (`componentName`, `htmlContent`, `jsContent`, etc.) sono mancanti.
      * @throws {Error} Se il deploy del container fallisce.
      * @returns {Promise<any>} Un oggetto che indica il successo e un messaggio descrittivo.
@@ -201,9 +204,9 @@ export class MetadataService {
      * Esegue il polling dello stato di un ContainerAsyncRequest.
      * Questa funzione ausiliaria interroga ciclicamente Salesforce per verificare lo stato
      * di un'operazione di deploy asincrona, attendendo uno stato finale o il timeout.
-     * Questo è essenziale per gestire la natura asincrona delle API di deploy e per
+     * Questo è essenziale per gestire la natura asincrona delle API de deploy e per
      * evitare "race conditions" tra operazioni dipendenti.
-     * * @private
+     * @private
      * @param {string} deployId L'ID del ContainerAsyncRequest da monitorare.
      * @param {number} [timeoutSeconds=30] Il numero massimo di secondi da attendere.
      * @returns {Promise<any>} L'oggetto finale del risultato del deploy.
@@ -230,3 +233,4 @@ export class MetadataService {
         throw new Error(`Timeout del deploy dopo ${timeoutSeconds} secondi. Stato attuale: ${deployResult?.State}.`);
     }
 }
+
