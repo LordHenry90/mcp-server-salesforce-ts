@@ -233,4 +233,3 @@ export class MetadataService {
         throw new Error(`Timeout del deploy dopo ${timeoutSeconds} secondi. Stato attuale: ${deployResult?.State}.`);
     }
 }
-
