@@ -24,57 +24,86 @@ export class MetadataService {
     }
 
     public async createLWC(params: CreateLWCRequest): Promise<any> {
-        // La creazione di LWC via API è un processo a più passaggi
-        // 1. Creare il Bundle con la struttura corretta
-        const bundleBody = {
-            FullName: params.componentName,
-            // Le proprietà specifiche devono essere annidate in un oggetto 'Metadata'
-            Metadata: {
-                apiVersion: params.apiVersion || 59.0,
-                isExposed: params.isExposed,
-                masterLabel: params.masterLabel
-            }
-        };
-        const bundleResult = await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentBundle', bundleBody);
+        // --- INIZIO IMPLEMENTAZIONE CORRETTA CON METADATA CONTAINER ---
         
-        if (!bundleResult.success) {
-            throw new Error(`Creazione del bundle LWC fallita: ${JSON.stringify(bundleResult)}`);
-        }
+        console.log(`Inizio creazione LWC con Metadata Container per: ${params.componentName}`);
 
-        // 2. Creare le Risorse (file). I 'targets' vengono usati qui, nel contenuto dell'XML.
-        
-        // --- INIZIO CORREZIONE ---
-        // Aggiungiamo un controllo per verificare che 'params.targets' esista e sia un array
-        // prima di tentare di chiamare il metodo .map() su di esso.
-        const targetsXml = params.targets && Array.isArray(params.targets) && params.targets.length > 0
-            ? `<targets>${params.targets.map((t: string) => `<target>${t}</target>`).join('\n        ')}</targets>`
-            : '';
-        // --- FINE CORREZIONE ---
+        // 1. Creare un MetadataContainer per raggruppare le modifiche
+        const containerName = `LWCContainer_${Date.now()}`;
+        const container = await this.apiClient.toolingApi('post', '/tooling/sobjects/MetadataContainer', {
+            Name: containerName
+        });
+        const containerId = container.id;
 
-        const metaXmlContent = `<?xml version="1.0" encoding="UTF-8"?>
+        try {
+            // 2. Creare il LightningComponentBundle e associarlo al container
+            const bundleBody = {
+                FullName: params.componentName,
+                Metadata: {
+                    apiVersion: params.apiVersion || 59.0,
+                    isExposed: params.isExposed,
+                    masterLabel: params.masterLabel
+                }
+            };
+            const bundleMember = await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentBundle', {
+                ...bundleBody,
+                MetadataContainerId: containerId
+            });
+
+            // 3. Creare le Risorse (file) e associarle al container
+            const metaXmlContent = `<?xml version="1.0" encoding="UTF-8"?>
 <LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
     <apiVersion>${params.apiVersion || 59.0}</apiVersion>
     <isExposed>${params.isExposed}</isExposed>
     <masterLabel>${params.masterLabel}</masterLabel>
-    ${targetsXml}
+    <targets>${params.targets ? params.targets.map((t: string) => `<target>${t}</target>`).join('\n        ') : ''}</targets>
 </LightningComponentBundle>`;
 
-        const resources = [
-            { FilePath: `lwc/${params.componentName}/${params.componentName}.html`, Format: 'HTML', Source: params.htmlContent },
-            { FilePath: `lwc/${params.componentName}/${params.componentName}.js`, Format: 'JavaScript', Source: params.jsContent },
-            { FilePath: `lwc/${params.componentName}/${params.componentName}.js-meta.xml`, Format: 'XML', Source: metaXmlContent }
-        ];
+            const resources = [
+                { FilePath: `lwc/${params.componentName}/${params.componentName}.html`, Format: 'HTML', Source: params.htmlContent },
+                { FilePath: `lwc/${params.componentName}/${params.componentName}.js`, Format: 'JavaScript', Source: params.jsContent },
+                { FilePath: `lwc/${params.componentName}/${params.componentName}.js-meta.xml`, Format: 'XML', Source: metaXmlContent }
+            ];
 
-        const resourceCreationPromises = resources.map(resource => 
-            this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentResource', {
-                LightningComponentBundleId: bundleResult.id,
-                ...resource
-            })
-        );
-        
-        await Promise.all(resourceCreationPromises);
-        
-        return { success: true, message: `Componente LWC '${params.componentName}' creato con successo.` };
+            const resourceCreationPromises = resources.map(resource => 
+                this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentResource', {
+                    LightningComponentBundleId: bundleMember.id,
+                    ...resource,
+                    MetadataContainerId: containerId
+                })
+            );
+            await Promise.all(resourceCreationPromises);
+
+            // 4. Avviare il deploy del container in modo asincrono
+            const deployRequest = await this.apiClient.toolingApi('post', '/tooling/sobjects/ContainerAsyncRequest', {
+                MetadataContainerId: containerId,
+                IsCheckOnly: false
+            });
+            const deployId = deployRequest.id;
+
+            // 5. Controllare lo stato del deploy (polling)
+            let deployResult;
+            for (let i = 0; i < 30; i++) { // Timeout dopo 30 secondi
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                deployResult = await this.apiClient.toolingApi('get', `/tooling/sobjects/ContainerAsyncRequest/${deployId}`);
+                if (deployResult.State === 'Completed' || deployResult.State === 'Failed') {
+                    break;
+                }
+            }
+
+            if (deployResult.State !== 'Completed') {
+                throw new Error(`Deploy del container fallito. Stato: ${deployResult.State}. Dettagli: ${JSON.stringify(deployResult.ErrorMsg)}`);
+            }
+            
+            console.log("Deploy LWC completato con successo.");
+            return { success: true, message: `Componente LWC '${params.componentName}' creato e deployato con successo.` };
+
+        } finally {
+            // 6. Pulizia: cancellare sempre il container dopo il deploy
+            await this.apiClient.toolingApi('delete', `/tooling/sobjects/MetadataContainer/${containerId}`);
+            console.log(`MetadataContainer ${containerName} cancellato.`);
+        }
+        // --- FINE IMPLEMENTAZIONE CORRETTA ---
     }
 
     // Aggiungi qui altre funzioni per creare campi, oggetti, etc.
