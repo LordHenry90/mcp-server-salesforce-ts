@@ -96,7 +96,10 @@ export class MetadataService {
 </LightningComponentBundle>`;
 
             const resources = [
-                { FilePath: `lwc/${params.componentName}/${params.componentName}.js`, Format: 'ECMAScript6', Source: params.jsContent },
+                // --- INIZIO CORREZIONE FONDAMENTALE ---
+                // Il valore corretto per il formato del file JavaScript è "JS"
+                { FilePath: `lwc/${params.componentName}/${params.componentName}.js`, Format: 'JS', Source: params.jsContent },
+                // --- FINE CORREZIONE FONDAMENTALE ---
                 { FilePath: `lwc/${params.componentName}/${params.componentName}.html`, Format: 'HTML', Source: params.htmlContent },
                 { FilePath: `lwc/${params.componentName}/${params.componentName}.js-meta.xml`, Format: 'XML', Source: metaXmlContent }
             ];
@@ -104,7 +107,6 @@ export class MetadataService {
             // Sostituiamo Promise.all con un loop sequenziale per garantire l'ordine di creazione
             for (const resource of resources) {
                 console.log(`Creazione risorsa: ${resource.FilePath}`);
-                // Correzione: usa 'resource' invece di 'res'
                 await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentResource', {
                     LightningComponentBundleId: bundleId, ...resource
                 });
