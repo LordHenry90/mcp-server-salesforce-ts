@@ -25,13 +25,13 @@ export class MetadataService {
 
     public async createLWC(params: CreateLWCRequest): Promise<any> {
         // La creazione di LWC via API è un processo a più passaggi
-        // 1. Creare il Bundle
+        // 1. Creare il Bundle (con il payload corretto, senza 'Targets')
         const bundleBody = {
             FullName: params.componentName,
             ApiVersion: params.apiVersion || 59.0,
             IsExposed: params.isExposed,
-            MasterLabel: params.masterLabel,
-            Targets: { target: params.targets }
+            MasterLabel: params.masterLabel
+            // La proprietà 'Targets' è stata rimossa da qui perché non valida per questo oggetto.
         };
         const bundleResult = await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentBundle', bundleBody);
         
@@ -39,13 +39,13 @@ export class MetadataService {
             throw new Error(`Creazione del bundle LWC fallita: ${JSON.stringify(bundleResult)}`);
         }
 
-        // 2. Creare le Risorse (file)
+        // 2. Creare le Risorse (file). I 'targets' vengono usati qui, nel contenuto dell'XML.
         const metaXmlContent = `<?xml version="1.0" encoding="UTF-8"?>
 <LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
     <apiVersion>${params.apiVersion || 59.0}</apiVersion>
     <isExposed>${params.isExposed}</isExposed>
     <masterLabel>${params.masterLabel}</masterLabel>
-    <targets>${params.targets.map(t => `<target>${t}</target>`).join('\n        ')}</targets>
+    <targets>${params.targets.map((t: string) => `<target>${t}</target>`).join('\n        ')}</targets>
 </LightningComponentBundle>`;
 
         const resources = [
@@ -66,5 +66,6 @@ export class MetadataService {
         return { success: true, message: `Componente LWC '${params.componentName}' creato con successo.` };
     }
 
-    // Aggiungi qui altre funzioni per creare campi, oggetti, etc., usando la Metadata API (SOAP) se necessario
+    // Aggiungi qui altre funzioni per creare campi, oggetti, etc.
 }
+
