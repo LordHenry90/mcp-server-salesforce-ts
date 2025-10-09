@@ -24,19 +24,15 @@ export class MetadataService {
     }
 
     public async createLWC(params: CreateLWCRequest): Promise<any> {
-        // --- INIZIO IMPLEMENTAZIONE CORRETTA CON METADATA CONTAINER ---
-        
         console.log(`Inizio creazione LWC con Metadata Container per: ${params.componentName}`);
 
-        // 1. Creare un MetadataContainer per raggruppare le modifiche
+        // 1. Creare un MetadataContainer
         const containerName = `LWCContainer_${Date.now()}`;
-        const container = await this.apiClient.toolingApi('post', '/tooling/sobjects/MetadataContainer', {
-            Name: containerName
-        });
+        const container = await this.apiClient.toolingApi('post', '/tooling/sobjects/MetadataContainer', { Name: containerName });
         const containerId = container.id;
 
         try {
-            // 2. Creare il LightningComponentBundle e associarlo al container
+            // 2. Creare il LightningComponentBundle (Senza riferimento al container)
             const bundleBody = {
                 FullName: params.componentName,
                 Metadata: {
@@ -45,12 +41,17 @@ export class MetadataService {
                     masterLabel: params.masterLabel
                 }
             };
-            const bundleMember = await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentBundle', {
-                ...bundleBody,
-                MetadataContainerId: containerId
+            const bundle = await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentBundle', bundleBody);
+            
+            // --- INIZIO CORREZIONE FONDAMENTALE ---
+            // 3. Creare il LightningComponentBundleMember per associare il bundle al container
+            await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentBundleMember', {
+                MetadataContainerId: containerId,
+                ContentEntityId: bundle.id // ID del bundle appena creato
             });
+            // --- FINE CORREZIONE FONDAMENTALE ---
 
-            // 3. Creare le Risorse (file) e associarle al container
+            // 4. Creare le Risorse (file) e associarle al bundle
             const metaXmlContent = `<?xml version="1.0" encoding="UTF-8"?>
 <LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
     <apiVersion>${params.apiVersion || 59.0}</apiVersion>
@@ -67,21 +68,20 @@ export class MetadataService {
 
             const resourceCreationPromises = resources.map(resource => 
                 this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentResource', {
-                    LightningComponentBundleId: bundleMember.id,
-                    ...resource,
-                    MetadataContainerId: containerId
+                    LightningComponentBundleId: bundle.id,
+                    ...resource
                 })
             );
             await Promise.all(resourceCreationPromises);
 
-            // 4. Avviare il deploy del container in modo asincrono
+            // 5. Avviare il deploy del container
             const deployRequest = await this.apiClient.toolingApi('post', '/tooling/sobjects/ContainerAsyncRequest', {
                 MetadataContainerId: containerId,
                 IsCheckOnly: false
             });
             const deployId = deployRequest.id;
 
-            // 5. Controllare lo stato del deploy (polling)
+            // 6. Controllare lo stato del deploy (polling)
             let deployResult;
             for (let i = 0; i < 30; i++) { // Timeout dopo 30 secondi
                 await new Promise(resolve => setTimeout(resolve, 1000));
@@ -99,11 +99,10 @@ export class MetadataService {
             return { success: true, message: `Componente LWC '${params.componentName}' creato e deployato con successo.` };
 
         } finally {
-            // 6. Pulizia: cancellare sempre il container dopo il deploy
+            // 7. Pulizia: cancellare sempre il container
             await this.apiClient.toolingApi('delete', `/tooling/sobjects/MetadataContainer/${containerId}`);
             console.log(`MetadataContainer ${containerName} cancellato.`);
         }
-        // --- FINE IMPLEMENTAZIONE CORRETTA ---
     }
 
     // Aggiungi qui altre funzioni per creare campi, oggetti, etc.
