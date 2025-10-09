@@ -25,13 +25,15 @@ export class MetadataService {
 
     public async createLWC(params: CreateLWCRequest): Promise<any> {
         // La creazione di LWC via API è un processo a più passaggi
-        // 1. Creare il Bundle (con il payload corretto, senza 'Targets')
+        // 1. Creare il Bundle con la struttura corretta
         const bundleBody = {
             FullName: params.componentName,
-            ApiVersion: params.apiVersion || 59.0,
-            IsExposed: params.isExposed,
-            MasterLabel: params.masterLabel
-            // La proprietà 'Targets' è stata rimossa da qui perché non valida per questo oggetto.
+            // Le proprietà specifiche devono essere annidate in un oggetto 'Metadata'
+            Metadata: {
+                apiVersion: params.apiVersion || 59.0,
+                isExposed: params.isExposed,
+                masterLabel: params.masterLabel
+            }
         };
         const bundleResult = await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentBundle', bundleBody);
         
