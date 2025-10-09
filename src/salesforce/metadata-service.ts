@@ -42,12 +42,21 @@ export class MetadataService {
         }
 
         // 2. Creare le Risorse (file). I 'targets' vengono usati qui, nel contenuto dell'XML.
+        
+        // --- INIZIO CORREZIONE ---
+        // Aggiungiamo un controllo per verificare che 'params.targets' esista e sia un array
+        // prima di tentare di chiamare il metodo .map() su di esso.
+        const targetsXml = params.targets && Array.isArray(params.targets) && params.targets.length > 0
+            ? `<targets>${params.targets.map((t: string) => `<target>${t}</target>`).join('\n        ')}</targets>`
+            : '';
+        // --- FINE CORREZIONE ---
+
         const metaXmlContent = `<?xml version="1.0" encoding="UTF-8"?>
 <LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
     <apiVersion>${params.apiVersion || 59.0}</apiVersion>
     <isExposed>${params.isExposed}</isExposed>
     <masterLabel>${params.masterLabel}</masterLabel>
-    <targets>${params.targets.map((t: string) => `<target>${t}</target>`).join('\n        ')}</targets>
+    ${targetsXml}
 </LightningComponentBundle>`;
 
         const resources = [
