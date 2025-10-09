@@ -46,11 +46,6 @@ export class MetadataService {
     public async createLWC(params: CreateLWCRequest): Promise<any> {
         console.log(`Inizio processo di Upsert per LWC: ${params.componentName}`);
         
-        // Per gli LWC, il processo di "upsert" è più complesso e coinvolge sempre un container.
-        // La logica di deploy asincrona gestisce implicitamente sia la creazione che l'aggiornamento.
-        // La nostra implementazione esistente con i container è già una forma di "upsert".
-        // L'errore "DUPLICATE_VALUE" qui indica un problema diverso, probabilmente nella logica di creazione del membro.
-        
         // 1. Creare un MetadataContainer
         const containerName = `LWCContainer_${Date.now()}`;
         const container = await this.apiClient.toolingApi('post', '/tooling/sobjects/MetadataContainer', { Name: containerName });
@@ -58,17 +53,18 @@ export class MetadataService {
 
         try {
             // 2. Controlla se il bundle esiste già per ottenere il suo ID
-            const query = `SELECT Id FROM LightningComponentBundle WHERE DeveloperName = '${params.componentName}'`;
+            const query = `SELECT Id, DeveloperName FROM LightningComponentBundle WHERE DeveloperName = '${params.componentName}'`;
             const queryResult = await this.apiClient.toolingApi('get', `/tooling/query?q=${encodeURIComponent(query)}`);
 
             let bundleId: string;
+            let bundleBody: any;
 
             if (queryResult.records.length > 0) {
                 bundleId = queryResult.records[0].Id;
                 console.log(`Bundle LWC '${params.componentName}' trovato con ID: ${bundleId}. Verrà aggiornato.`);
             } else {
                 // Se il bundle non esiste, crealo
-                const bundleBody = {
+                bundleBody = {
                     FullName: params.componentName,
                     Metadata: {
                         apiVersion: params.apiVersion || 59.0,
@@ -81,11 +77,13 @@ export class MetadataService {
                 console.log(`Nuovo bundle LWC '${params.componentName}' creato con ID: ${bundleId}.`);
             }
             
-            // 3. Creare il LightningComponentBundleMember per associare il bundle al container
-            await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentBundleMember', {
+            // --- INIZIO CORREZIONE FONDAMENTALE ---
+            // 3. Creare il MetadataContainerMember per associare il bundle al container
+            await this.apiClient.toolingApi('post', '/tooling/sobjects/MetadataContainerMember', {
                 MetadataContainerId: containerId,
                 ContentEntityId: bundleId
             });
+            // --- FINE CORREZIONE FONDAMENTALE ---
 
             // 4. Creare o Aggiornare le Risorse (file) associandole al bundle
             const metaXmlContent = `<?xml version="1.0" encoding="UTF-8"?>
@@ -102,8 +100,6 @@ export class MetadataService {
                 { FilePath: `lwc/${params.componentName}/${params.componentName}.js-meta.xml`, Format: 'XML', Source: metaXmlContent }
             ];
 
-            // Questa parte è complessa con l'API. Per un "upsert", è più sicuro sovrascrivere.
-            // La logica di deploy asincrona del container si occuperà di gestire l'aggiornamento.
             const resourceCreationPromises = resources.map(resource => 
                 this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentResource', {
                     LightningComponentBundleId: bundleId,
