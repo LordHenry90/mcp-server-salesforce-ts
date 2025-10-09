@@ -6,11 +6,13 @@ import {
 } from '../models';
 
 /**
- * MetadataService incapsula la logica di business per interagire con le API
- * di Salesforce, in particolare l'API Tooling, per la creazione e l'aggiornamento
- * di metadati come Classi Apex e Lightning Web Components.
- * Questa classe è progettata per essere "idempotente", gestendo sia la creazione
- * che l'aggiornamento dei metadati per evitare errori di duplicazione.
+ * @class MetadataService
+ * @description Incapsula la logica di business di alto livello per interagire con le API
+ * di Salesforce, in particolare l'API Tooling. Questa classe orchestra operazioni
+ * complesse come la creazione e l'aggiornamento di metadati (Upsert).
+ * È progettata per essere "idempotente", gestendo in modo sicuro le riesecuzioni
+ * e garantendo la coerenza dei metadati nell'organizzazione Salesforce.
+ * Ogni metodo pubblico rappresenta uno "strumento" che può essere esposto a un agente AI.
  */
 export class MetadataService {
     private apiClient: SalesforceApiClient;
@@ -20,65 +22,69 @@ export class MetadataService {
     }
 
     /**
-     * Crea o aggiorna una classe Apex in Salesforce.
-     * Questa funzione implementa una logica di "Upsert":
-     * 1. Controlla se una classe con il nome specificato esiste già.
-     * 2. Se esiste, aggiorna il corpo della classe (PATCH).
-     * 3. Se non esiste, crea una nuova classe (POST).
-     * L'intera operazione viene eseguita all'interno di un MetadataContainer per 
-     * garantire un deploy atomico e affidabile.
-     * @param params I parametri per la creazione della classe Apex.
-     * @returns Un oggetto che indica il successo e un messaggio descrittivo.
+     * Crea o aggiorna una classe Apex in Salesforce utilizzando una logica di "Upsert".
+     * Il processo è atomico e viene gestito tramite un MetadataContainer per garantire
+     * un deploy affidabile.
+     * 1. Viene creato un MetadataContainer temporaneo.
+     * 2. Si esegue una query per verificare se la classe Apex esiste già.
+     * 3. Se la classe esiste, viene aggiornata; altrimenti, viene creata.
+     * 4. La classe viene aggiunta al container tramite un ApexClassMember.
+     * 5. Viene avviato un deploy asincrono del container.
+     * 6. Lo stato del deploy viene monitorato (polling) fino al completamento.
+     * 7. Il container temporaneo viene sempre cancellato, sia in caso di successo che di fallimento.
+     * * @param {CreateApexClassRequest} params I parametri per la creazione/aggiornamento della classe Apex.
+     * @throws {Error} Se i parametri richiesti (`className`, `body`) sono mancanti.
+     * @throws {Error} Se il deploy fallisce.
+     * @returns {Promise<any>} Un oggetto che indica il successo e un messaggio descrittivo.
      */
     public async createApexClass(params: CreateApexClassRequest): Promise<any> {
+        // --- VALIDAZIONE DELL'INPUT ---
+        if (!params.className || !params.body) {
+            throw new Error("Validazione fallita: 'className' e 'body' sono parametri obbligatori per createApexClass.");
+        }
+        
         console.log(`Inizio processo di deploy per la classe Apex: ${params.className}`);
         const containerName = `ApexContainer_${Date.now()}`;
         const container = await this.apiClient.toolingApi('post', '/tooling/sobjects/MetadataContainer', { Name: containerName });
         const containerId = container.id;
 
         try {
-            // Passo 1: Verifica l'esistenza della classe Apex tramite una query SOQL sulla Tooling API.
-            const query = `SELECT Id, Body FROM ApexClass WHERE Name = '${params.className}'`;
+            // Passo 1: Verifica l'esistenza della classe Apex.
+            const query = `SELECT Id FROM ApexClass WHERE Name = '${params.className}'`;
             const queryResult = await this.apiClient.toolingApi('get', `/tooling/query?q=${encodeURIComponent(query)}`);
 
             let classId: string;
             if (queryResult.records.length > 0) {
-                // La classe esiste, quindi procediamo con un aggiornamento.
                 classId = queryResult.records[0].Id;
                 console.log(`Classe '${params.className}' trovata con ID: ${classId}. Verrà aggiornata.`);
-                // L'aggiornamento del corpo della classe viene gestito tramite l'ApexClassMember.
+                // L'aggiornamento effettivo del codice avviene tramite l'ApexClassMember.
             } else {
-                // La classe non esiste, quindi procediamo con la creazione.
                 console.log(`Classe '${params.className}' non trovata. Verrà creata.`);
                 const newClass = await this.apiClient.toolingApi('post', '/tooling/sobjects/ApexClass', {
                     FullName: params.className,
-                    Body: params.body, // Il corpo è necessario solo per la creazione iniziale
+                    Body: params.body,
                     ApiVersion: params.apiVersion || 59.0
                 });
                 classId = newClass.id;
             }
 
-            // Passo 2: Creare l'ApexClassMember. Questo è il passaggio chiave per aggiungere o aggiornare
-            // il contenuto della classe all'interno del nostro container di deploy.
+            // Passo 2: Aggiunge la classe (nuova o esistente) al container per il deploy.
             await this.apiClient.toolingApi('post', '/tooling/sobjects/ApexClassMember', {
                 MetadataContainerId: containerId,
                 ContentEntityId: classId,
-                Body: params.body // Il corpo del codice viene specificato qui per il deploy.
+                Body: params.body // Il corpo del codice è sempre necessario per l'operazione di deploy.
             });
 
-            // Passo 3: Avviare il deploy asincrono del container.
+            // Passo 3: Avvia il deploy asincrono.
             const deployRequest = await this.apiClient.toolingApi('post', '/tooling/sobjects/ContainerAsyncRequest', {
                 MetadataContainerId: containerId,
                 IsCheckOnly: false
             });
 
-            // Passo 4: Attendere il completamento del deploy tramite polling.
-            // Questo è il passaggio cruciale per risolvere la "race condition".
-            // La funzione non restituirà il controllo finché il deploy non sarà finalizzato.
+            // Passo 4: Attendi il completamento del deploy tramite polling.
             const deployResult = await this.pollDeployStatus(deployRequest.id);
 
             if (deployResult.State !== 'Completed') {
-                // Se il deploy fallisce, costruiamo un messaggio di errore dettagliato.
                 const errorDetails = deployResult.DeployDetails?.componentFailures ? 
                                      JSON.stringify(deployResult.DeployDetails.componentFailures) : 
                                      deployResult.ErrorMsg || 'Nessun dettaglio disponibile.';
@@ -88,7 +94,7 @@ export class MetadataService {
             console.log(`Deploy della classe Apex '${params.className}' completato con successo.`);
             return { success: true, message: `Classe Apex '${params.className}' creata/aggiornata con successo.` };
         } finally {
-            // Passo 5: Pulizia. Il MetadataContainer è temporaneo e deve sempre essere cancellato.
+            // Passo 5: Pulizia del container.
             await this.apiClient.toolingApi('delete', `/tooling/sobjects/MetadataContainer/${containerId}`);
             console.log(`Pulizia: MetadataContainer ${containerName} cancellato.`);
         }
@@ -96,17 +102,19 @@ export class MetadataService {
 
     /**
      * Crea o aggiorna un Lightning Web Component (LWC).
-     * Questa funzione gestisce il complesso processo di deploy di un LWC tramite Tooling API.
-     * 1. Crea un MetadataContainer temporaneo.
-     * 2. Cerca se il Component Bundle esiste già. Se non esiste, lo crea.
-     * 3. Crea le singole risorse (file .js, .html, .xml) in modo sequenziale.
-     * 4. Associa il bundle al container tramite un LightningComponentBundleMember.
-     * 5. Avvia il deploy asincrono e attende il suo completamento.
-     * 6. Pulisce le risorse temporanee.
-     * @param params I parametri per la creazione del LWC.
-     * @returns Un oggetto che indica il successo e un messaggio descrittivo.
+     * Questo metodo orchestra il complesso processo di deploy di un LWC, che richiede
+     * la gestione di un container di metadati e la creazione sequenziale di più risorse.
+     * * @param {CreateLWCRequest} params I parametri completi per la creazione del LWC.
+     * @throws {Error} Se i parametri richiesti (`componentName`, `htmlContent`, `jsContent`, etc.) sono mancanti.
+     * @throws {Error} Se il deploy del container fallisce.
+     * @returns {Promise<any>} Un oggetto che indica il successo e un messaggio descrittivo.
      */
     public async createLWC(params: CreateLWCRequest): Promise<any> {
+        // --- VALIDAZIONE DELL'INPUT ---
+        if (!params.componentName || !params.htmlContent || !params.jsContent || !params.masterLabel || params.isExposed === undefined) {
+            throw new Error("Validazione fallita: 'componentName', 'htmlContent', 'jsContent', 'masterLabel' e 'isExposed' sono obbligatori per createLWC.");
+        }
+        
         console.log(`Inizio processo di deploy per LWC: ${params.componentName}`);
         
         const containerName = `LWCContainer_${Date.now()}`;
@@ -123,7 +131,6 @@ export class MetadataService {
                 bundleId = queryResult.records[0].Id;
                 console.log(`Bundle LWC '${params.componentName}' esistente trovato con ID: ${bundleId}.`);
             } else {
-                // Se non esiste, crea un nuovo bundle.
                 const newBundle = await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentBundle', {
                     FullName: params.componentName,
                     Metadata: {
@@ -136,7 +143,7 @@ export class MetadataService {
                 console.log(`Nuovo bundle LWC '${params.componentName}' creato con ID: ${bundleId}.`);
             }
             
-            // Passo 2: Prepara i contenuti dei file del componente.
+            // Passo 2: Prepara i contenuti dei file.
             const metaXmlContent = `<?xml version="1.0" encoding="UTF-8"?>
 <LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
     <apiVersion>${params.apiVersion || 59.0}</apiVersion>
@@ -151,31 +158,28 @@ export class MetadataService {
                 { FilePath: `lwc/${params.componentName}/${params.componentName}.js-meta.xml`, Format: 'XML', Source: metaXmlContent }
             ];
 
-            // Passo 3: Crea o aggiorna le risorse in modo sequenziale per evitare race conditions.
-            // Il file .js deve essere creato per primo perché gli altri dipendono da esso.
+            // Passo 3: Crea o aggiorna le risorse in modo sequenziale.
             for (const resource of resources) {
                 console.log(`Creazione/Aggiornamento risorsa: ${resource.FilePath}`);
-                // La logica di "upsert" per le risorse è gestita dal deploy del container.
-                // Qui le aggiungiamo semplicemente al bundle.
                 await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentResource', {
                     LightningComponentBundleId: bundleId, ...resource
                 });
             }
             
-            // Passo 4: Associa il bundle completato al container di deploy.
+            // Passo 4: Associa il bundle completato al container.
             await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentBundleMember', {
                 MetadataContainerId: containerId,
                 ContentEntityId: bundleId
             });
 
-            // Passo 5: Avvia il deploy asincrono del container.
+            // Passo 5: Avvia il deploy asincrono.
             const deployRequest = await this.apiClient.toolingApi('post', '/tooling/sobjects/ContainerAsyncRequest', {
                 MetadataContainerId: containerId,
                 IsCheckOnly: false
             });
 
-            // Passo 6: Attendi il completamento del deploy tramite polling.
-            const deployResult = await this.pollDeployStatus(deployRequest.id, 60); // Timeout più lungo per LWC
+            // Passo 6: Attendi il completamento.
+            const deployResult = await this.pollDeployStatus(deployRequest.id, 60);
 
             if (deployResult.State !== 'Completed') {
                 const errorDetails = deployResult.DeployDetails?.componentFailures ? 
@@ -187,18 +191,23 @@ export class MetadataService {
             console.log(`Deploy del componente LWC '${params.componentName}' completato con successo.`);
             return { success: true, message: `Componente LWC '${params.componentName}' creato/aggiornato con successo.` };
         } finally {
-            // Passo 7: Pulizia finale del container.
+            // Passo 7: Pulizia del container.
             await this.apiClient.toolingApi('delete', `/tooling/sobjects/MetadataContainer/${containerId}`);
             console.log(`Pulizia: MetadataContainer ${containerName} cancellato.`);
         }
     }
 
     /**
-     * Esegue il polling dello stato di un ContainerAsyncRequest fino a quando non raggiunge
-     * uno stato finale (Completed, Failed, Error) o scade il timeout.
-     * @param deployId L'ID del ContainerAsyncRequest da monitorare.
-     * @param timeoutSeconds Il numero massimo di secondi da attendere. Default 30.
-     * @returns L'oggetto finale del risultato del deploy.
+     * Esegue il polling dello stato di un ContainerAsyncRequest.
+     * Questa funzione ausiliaria interroga ciclicamente Salesforce per verificare lo stato
+     * di un'operazione di deploy asincrona, attendendo uno stato finale o il timeout.
+     * Questo è essenziale per gestire la natura asincrona delle API di deploy e per
+     * evitare "race conditions" tra operazioni dipendenti.
+     * * @private
+     * @param {string} deployId L'ID del ContainerAsyncRequest da monitorare.
+     * @param {number} [timeoutSeconds=30] Il numero massimo di secondi da attendere.
+     * @returns {Promise<any>} L'oggetto finale del risultato del deploy.
+     * @throws {Error} Se il deploy scade o fallisce in modo imprevisto.
      */
     private async pollDeployStatus(deployId: string, timeoutSeconds: number = 30): Promise<any> {
         let deployResult;
@@ -208,19 +217,16 @@ export class MetadataService {
         for (let i = 0; i < timeoutSeconds; i++) {
             deployResult = await this.apiClient.toolingApi('get', `/tooling/sobjects/ContainerAsyncRequest/${deployId}`);
             
-            console.log(`Polling... Stato del deploy: ${deployResult.State}`);
+            console.log(`Polling... Stato del deploy [${i+1}/${timeoutSeconds}]: ${deployResult.State}`);
 
             if (finalStates.includes(deployResult.State)) {
                 console.log(`Polling terminato. Stato finale: ${deployResult.State}.`);
                 return deployResult;
             }
-            // Attendi un secondo prima del prossimo controllo
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
-        // Se il loop finisce senza uno stato finale, consideralo un timeout.
         console.error(`Polling scaduto per il deploy ID: ${deployId}.`);
         throw new Error(`Timeout del deploy dopo ${timeoutSeconds} secondi. Stato attuale: ${deployResult?.State}.`);
     }
 }
-
