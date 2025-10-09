@@ -48,20 +48,29 @@ export class MetadataService {
         const containerId = container.id;
 
         try {
-            // L'associazione al container avviene qui, passando MetadataContainerId
-            const bundleBody = {
-                FullName: params.componentName,
-                MetadataContainerId: containerId, // Associazione al container
-                Metadata: {
-                    apiVersion: params.apiVersion || 59.0,
-                    isExposed: params.isExposed,
-                    masterLabel: params.masterLabel
-                }
-            };
-            const newBundle = await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentBundle', bundleBody);
-            const bundleId = newBundle.id;
-            console.log(`Nuovo bundle LWC '${params.componentName}' creato e associato al container.`);
+            // 1. Creare o trovare il LightningComponentBundle (senza associazione al container)
+            const query = `SELECT Id FROM LightningComponentBundle WHERE DeveloperName = '${params.componentName}'`;
+            const queryResult = await this.apiClient.toolingApi('get', `/tooling/query?q=${encodeURIComponent(query)}`);
             
+            let bundleId: string;
+            if (queryResult.records.length > 0) {
+                bundleId = queryResult.records[0].Id;
+                console.log(`Bundle LWC '${params.componentName}' esistente trovato con ID: ${bundleId}.`);
+            } else {
+                const bundleBody = {
+                    FullName: params.componentName,
+                    Metadata: {
+                        apiVersion: params.apiVersion || 59.0,
+                        isExposed: params.isExposed,
+                        masterLabel: params.masterLabel
+                    }
+                };
+                const newBundle = await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentBundle', bundleBody);
+                bundleId = newBundle.id;
+                console.log(`Nuovo bundle LWC '${params.componentName}' creato con ID: ${bundleId}.`);
+            }
+            
+            // 2. Preparare le risorse
             const metaXmlContent = `<?xml version="1.0" encoding="UTF-8"?>
 <LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
     <apiVersion>${params.apiVersion || 59.0}</apiVersion>
@@ -76,23 +85,27 @@ export class MetadataService {
                 { FilePath: `lwc/${params.componentName}/${params.componentName}.js-meta.xml`, Format: 'XML', Source: metaXmlContent }
             ];
 
+            // 3. Creare le risorse associandole sia al bundle che al container
             const resourceCreationPromises = resources.map(resource => 
                 this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentResource', {
                     LightningComponentBundleId: bundleId,
-                    MetadataContainerId: containerId, // Associazione al container
+                    MetadataContainerId: containerId, // Associazione al container avviene qui
                     ...resource
                 })
             );
             await Promise.all(resourceCreationPromises);
+            console.log("Tutte le risorse LWC sono state create e associate al container.");
 
+            // 4. Avviare il deploy del container
             const deployRequest = await this.apiClient.toolingApi('post', '/tooling/sobjects/ContainerAsyncRequest', {
                 MetadataContainerId: containerId,
                 IsCheckOnly: false
             });
             const deployId = deployRequest.id;
 
+            // 5. Controllare lo stato del deploy (polling)
             let deployResult;
-            for (let i = 0; i < 30; i++) {
+            for (let i = 0; i < 30; i++) { // Timeout dopo 30 secondi
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 deployResult = await this.apiClient.toolingApi('get', `/tooling/sobjects/ContainerAsyncRequest/${deployId}`);
                 if (['Completed', 'Failed', 'Queued', 'Error'].includes(deployResult.State)) {
@@ -108,6 +121,7 @@ export class MetadataService {
             return { success: true, message: `Componente LWC '${params.componentName}' creato/aggiornato con successo.` };
 
         } finally {
+            // 6. Pulizia: cancellare sempre il container dopo il deploy
             await this.apiClient.toolingApi('delete', `/tooling/sobjects/MetadataContainer/${containerId}`);
             console.log(`MetadataContainer ${containerName} cancellato.`);
         }
