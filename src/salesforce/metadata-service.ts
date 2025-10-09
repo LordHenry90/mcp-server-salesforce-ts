@@ -19,18 +19,15 @@ export class MetadataService {
         const containerId = container.id;
 
         try {
-            // 1. Controlla se la classe esiste per decidere se creare o aggiornare
             const query = `SELECT Id, Body FROM ApexClass WHERE Name = '${params.className}'`;
             const queryResult = await this.apiClient.toolingApi('get', `/tooling/query?q=${encodeURIComponent(query)}`);
 
             let classId: string;
             if (queryResult.records.length > 0) {
-                // Se la classe esiste, aggiorniamo solo il Body
                 classId = queryResult.records[0].Id;
                 console.log(`Classe '${params.className}' trovata. Verrà aggiornata.`);
                 await this.apiClient.toolingApi('patch', `/tooling/sobjects/ApexClass/${classId}`, { Body: params.body });
             } else {
-                // Se non esiste, la creiamo
                 console.log(`Classe '${params.className}' non trovata. Verrà creata.`);
                 const newClass = await this.apiClient.toolingApi('post', '/tooling/sobjects/ApexClass', {
                     FullName: params.className,
@@ -40,22 +37,18 @@ export class MetadataService {
                 classId = newClass.id;
             }
 
-            // 2. Creare il membro per associare la classe al container
             await this.apiClient.toolingApi('post', '/tooling/sobjects/ApexClassMember', {
                 MetadataContainerId: containerId,
                 ContentEntityId: classId,
-                Body: params.body // Il corpo è richiesto anche qui per l'aggiornamento
+                Body: params.body
             });
 
-            // 3. Avviare il deploy del container
             const deployRequest = await this.apiClient.toolingApi('post', '/tooling/sobjects/ContainerAsyncRequest', {
                 MetadataContainerId: containerId,
                 IsCheckOnly: false
             });
 
-            // 4. Polling dello stato (logica semplificata)
-            // In un'implementazione reale, questo sarebbe più robusto
-            await new Promise(resolve => setTimeout(resolve, 3000)); // Attesa statica
+            await new Promise(resolve => setTimeout(resolve, 3000));
             const deployResult = await this.apiClient.toolingApi('get', `/tooling/sobjects/ContainerAsyncRequest/${deployRequest.id}`);
 
             if (deployResult.State !== 'Completed') {
@@ -64,7 +57,6 @@ export class MetadataService {
 
             return { success: true, message: `Classe Apex '${params.className}' creata/aggiornata con successo.` };
         } finally {
-            // 5. Pulizia
             await this.apiClient.toolingApi('delete', `/tooling/sobjects/MetadataContainer/${containerId}`);
         }
     }
@@ -77,7 +69,6 @@ export class MetadataService {
         const containerId = container.id;
 
         try {
-            // 1. Creare o trovare il LightningComponentBundle
             const query = `SELECT Id FROM LightningComponentBundle WHERE DeveloperName = '${params.componentName}'`;
             const queryResult = await this.apiClient.toolingApi('get', `/tooling/query?q=${encodeURIComponent(query)}`);
             
@@ -96,33 +87,40 @@ export class MetadataService {
                 bundleId = newBundle.id;
             }
             
-            // 2. Preparare e creare le risorse (file) associandole al bundle
-            const metaXmlContent = `<?xml version="1.0" encoding="UTF-8"?>...`; // Omissis per brevità
+            const metaXmlContent = `<?xml version="1.0" encoding="UTF-8"?>
+<LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>${params.apiVersion || 59.0}</apiVersion>
+    <isExposed>${params.isExposed}</isExposed>
+    <masterLabel>${params.masterLabel}</masterLabel>
+    <targets>${params.targets ? params.targets.map((t: string) => `<target>${t}</target>`).join('\n        ') : ''}</targets>
+</LightningComponentBundle>`;
+
             const resources = [
+                { FilePath: `lwc/${params.componentName}/${params.componentName}.js`, Format: 'ECMAScript6', Source: params.jsContent },
                 { FilePath: `lwc/${params.componentName}/${params.componentName}.html`, Format: 'HTML', Source: params.htmlContent },
-                { FilePath: `lwc/${params.componentName}/${params.componentName}.js`, Format: 'JavaScript', Source: params.jsContent },
                 { FilePath: `lwc/${params.componentName}/${params.componentName}.js-meta.xml`, Format: 'XML', Source: metaXmlContent }
             ];
 
-            const resourcePromises = resources.map(res => this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentResource', {
-                LightningComponentBundleId: bundleId, ...res
-            }));
-            await Promise.all(resourcePromises);
+            // Sostituiamo Promise.all con un loop sequenziale per garantire l'ordine di creazione
+            for (const resource of resources) {
+                console.log(`Creazione risorsa: ${resource.FilePath}`);
+                // Correzione: usa 'resource' invece di 'res'
+                await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentResource', {
+                    LightningComponentBundleId: bundleId, ...resource
+                });
+            }
             
-            // 3. Creare il LightningComponentBundleMember per associare il bundle al container
             await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentBundleMember', {
                 MetadataContainerId: containerId,
                 ContentEntityId: bundleId
             });
 
-            // 4. Avviare il deploy del container
             const deployRequest = await this.apiClient.toolingApi('post', '/tooling/sobjects/ContainerAsyncRequest', {
                 MetadataContainerId: containerId,
                 IsCheckOnly: false
             });
 
-            // 5. Polling dello stato
-            await new Promise(resolve => setTimeout(resolve, 5000)); // Attesa più lunga per LWC
+            await new Promise(resolve => setTimeout(resolve, 5000));
             const deployResult = await this.apiClient.toolingApi('get', `/tooling/sobjects/ContainerAsyncRequest/${deployRequest.id}`);
 
             if (deployResult.State !== 'Completed') {
@@ -131,7 +129,6 @@ export class MetadataService {
             
             return { success: true, message: `Componente LWC '${params.componentName}' creato/aggiornato con successo.` };
         } finally {
-            // 6. Pulizia
             await this.apiClient.toolingApi('delete', `/tooling/sobjects/MetadataContainer/${containerId}`);
         }
     }
