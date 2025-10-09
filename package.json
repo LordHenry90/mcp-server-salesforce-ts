@@ -1,7 +1,7 @@
 {
   "name": "mcp-server-salesforce-ts",
   "version": "1.0.0",
-  "description": "Server MCP conforme per Salesforce in TypeScript",
+  "description": "Server MCP conforme per Salesforce con libreria personalizzata",
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
@@ -18,14 +18,16 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "axios": "^1.7.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "jsforce": "^3.2.2"
+    "jsonwebtoken": "^9.0.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^20.12.12",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.4.5"

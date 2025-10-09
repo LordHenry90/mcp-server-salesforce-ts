@@ -1,10 +1,10 @@
-import { SalesforceApiClient } from './salesforce/api-client';
+import { SalesforceApiClient } from './api-client';
 import { 
     CreateApexClassRequest, 
     CreateLWCRequest, 
     CreateCustomFieldRequest, 
     SalesforceCredentials 
-} from './models';
+} from '../models';
 
 export class MetadataService {
     private apiClient: SalesforceApiClient;
@@ -45,7 +45,7 @@ export class MetadataService {
     <apiVersion>${params.apiVersion || 59.0}</apiVersion>
     <isExposed>${params.isExposed}</isExposed>
     <masterLabel>${params.masterLabel}</masterLabel>
-    <targets>${params.targets.map((t: string) => `<target>${t}</target>`).join('\n        ')}</targets>
+    <targets>${params.targets.map(t => `<target>${t}</target>`).join('\n        ')}</targets>
 </LightningComponentBundle>`;
 
         const resources = [
@@ -66,6 +66,5 @@ export class MetadataService {
         return { success: true, message: `Componente LWC '${params.componentName}' creato con successo.` };
     }
 
-    // Aggiungi qui altre funzioni per creare campi, oggetti, etc.
+    // Aggiungi qui altre funzioni per creare campi, oggetti, etc., usando la Metadata API (SOAP) se necessario
 }
-

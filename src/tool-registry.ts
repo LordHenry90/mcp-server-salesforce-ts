@@ -1,57 +1,43 @@
-import * as sfdc from './salesforce-client';
+import { MetadataService } from './salesforce/metadata-service';
 import { 
     Tool,
-    CreateCustomObjectRequest,
-    CreateCustomFieldRequest,
     CreateApexClassRequest,
     CreateLWCRequest,
-    UpdatePermissionsRequest
+    SalesforceCredentials
 } from './models';
+import dotenv from 'dotenv';
 
-// Definiamo un tipo per il nostro registro per risolvere l'errore di indicizzazione implicita.
-// Questo dice a TypeScript che toolRegistry è un oggetto con chiavi di tipo stringa e valori di tipo Tool.
+dotenv.config();
+
+// Funzione per ottenere le credenziali in modo sicuro
+function getCredentials(): SalesforceCredentials {
+    const {
+        SF_LOGIN_URL,
+        SF_CONSUMER_KEY,
+        SF_USERNAME,
+        SF_PRIVATE_KEY
+    } = process.env;
+
+    if (!SF_LOGIN_URL || !SF_CONSUMER_KEY || !SF_USERNAME || !SF_PRIVATE_KEY) {
+        throw new Error("Mancano le variabili d'ambiente Salesforce necessarie.");
+    }
+
+    return {
+        loginUrl: SF_LOGIN_URL,
+        consumerKey: SF_CONSUMER_KEY,
+        username: SF_USERNAME,
+        privateKey: SF_PRIVATE_KEY.replace(/\\n/g, '\n')
+    };
+}
+
+// Inizializza il servizio una sola volta
+const metadataService = new MetadataService(getCredentials());
+
 type ToolRegistry = {
     [key: string]: Tool;
 };
 
-// Il nostro catalogo di strumenti, ora correttamente tipizzato.
 export const toolRegistry: ToolRegistry = {
-    createCustomObject: {
-        name: 'createCustomObject',
-        description: 'Crea un nuovo Oggetto Personalizzato (Custom Object) in Salesforce.',
-        parameters: {
-            type: 'object',
-            properties: {
-                apiName: { type: 'string', description: "Il nome API dell'oggetto (es. 'Prodotto'). Non includere '__c'." },
-                label: { type: 'string', description: "L'etichetta singolare (es. 'Prodotto')." },
-                pluralLabel: { type: 'string', description: "L'etichetta plurale (es. 'Prodotti')." }
-            },
-            required: ['apiName', 'label', 'pluralLabel']
-        },
-        execute: async (params: CreateCustomObjectRequest) => {
-            const conn = await sfdc.getSalesforceConnection();
-            return sfdc.createCustomObject(conn, params);
-        }
-    },
-    createCustomField: {
-        name: 'createCustomField',
-        description: 'Crea un nuovo Campo Personalizzato (Custom Field) su un oggetto esistente.',
-        parameters: {
-            type: 'object',
-            properties: {
-                objectApiName: { type: 'string', description: "Il nome API dell'oggetto a cui aggiungere il campo (es. 'Account' o 'Prodotto__c')." },
-                fieldApiName: { type: 'string', description: "Il nome API del campo (es. 'Codice_Prodotto'). Non includere '__c'." },
-                label: { type: 'string', description: "L'etichetta del campo." },
-                type: { type: 'string', enum: ['Text', 'Number', 'Date', 'Checkbox', 'LongTextArea'], description: "Il tipo di dato del campo." },
-                length: { type: 'number', description: "La lunghezza del campo (obbligatorio per il tipo 'Text')." }
-            },
-            required: ['objectApiName', 'fieldApiName', 'label', 'type']
-        },
-        execute: async (params: CreateCustomFieldRequest) => {
-            const conn = await sfdc.getSalesforceConnection();
-            return sfdc.createCustomField(conn, params);
-        }
-    },
     createApexClass: {
         name: 'createApexClass',
         description: 'Crea una nuova Classe Apex in Salesforce.',
@@ -60,56 +46,33 @@ export const toolRegistry: ToolRegistry = {
             properties: {
                 className: { type: 'string', description: "Il nome della classe Apex." },
                 body: { type: 'string', description: "Il corpo completo della classe Apex." },
-                apiVersion: { type: 'number', description: "La versione dell'API (es. 59.0). Default a 59.0." }
+                apiVersion: { type: 'number', description: "La versione dell'API (es. 59.0)." }
             },
             required: ['className', 'body']
         },
         execute: async (params: CreateApexClassRequest) => {
-            const conn = await sfdc.getSalesforceConnection();
-            return sfdc.createApexClass(conn, params);
+            return metadataService.createApexClass(params);
         }
     },
     createLWC: {
         name: 'createLWC',
-        description: 'Crea un nuovo Lightning Web Component (LWC) in Salesforce. Richiede i contenuti dei file HTML e JS.',
+        description: 'Crea un nuovo Lightning Web Component (LWC) in Salesforce.',
         parameters: {
             type: 'object',
             properties: {
                 componentName: { type: 'string', description: "Il nome API del componente in camelCase (es. 'myContactList')." },
-                masterLabel: { type: 'string', description: "L'etichetta visibile del componente (es. 'My Contact List')." },
-                isExposed: { type: 'boolean', description: "Impostare a 'true' per rendere il componente visibile nel Lightning App Builder." },
-                targets: { 
-                    type: 'array', 
-                    items: { type: 'string' },
-                    description: "Un array di target dove il componente può essere usato (es. ['lightning__AppPage', 'lightning__RecordPage'])."
-                },
-                htmlContent: { type: 'string', description: "Il contenuto completo del file .html del componente." },
-                jsContent: { type: 'string', description: "Il contenuto completo del file .js del componente." }
+                masterLabel: { type: 'string', description: "L'etichetta visibile del componente." },
+                isExposed: { type: 'boolean', description: "Impostare a 'true' per renderlo visibile nel App Builder." },
+                targets: { type: 'array', items: { type: 'string' }, description: "Un array di target (es. ['lightning__AppPage'])." },
+                htmlContent: { type: 'string', description: "Il contenuto del file .html." },
+                jsContent: { type: 'string', description: "Il contenuto del file .js." }
             },
             required: ['componentName', 'masterLabel', 'isExposed', 'targets', 'htmlContent', 'jsContent']
         },
         execute: async (params: CreateLWCRequest) => {
-            const conn = await sfdc.getSalesforceConnection();
-            return sfdc.createLWC(conn, params);
-        }
-    },
-    updateFieldPermissions: {
-        name: 'updateFieldPermissions',
-        description: "Aggiorna i permessi di un campo specifico (lettura/scrittura) per un profilo Salesforce.",
-        parameters: {
-            type: 'object',
-            properties: {
-                profileName: { type: 'string', description: "Il nome del profilo da modificare (es. 'System Administrator')." },
-                fieldApiName: { type: 'string', description: "Il nome API completo del campo (es. 'Account.MyCustomField__c')." },
-                editable: { type: 'boolean', description: "Impostare a 'true' per rendere il campo modificabile." },
-                readable: { type: 'boolean', description: "Impostare a 'true' per rendere il campo visibile." }
-            },
-            required: ['profileName', 'fieldApiName', 'editable', 'readable']
-        },
-        execute: async (params: UpdatePermissionsRequest) => {
-            const conn = await sfdc.getSalesforceConnection();
-            return sfdc.updateFieldPermissions(conn, params);
+            return metadataService.createLWC(params);
         }
     }
+    // Aggiungi qui altri strumenti
 };
 
