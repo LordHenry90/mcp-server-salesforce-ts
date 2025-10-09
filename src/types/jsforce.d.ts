@@ -1,25 +1,51 @@
-// Questo file estende le definizioni dei tipi ufficiali di @types/jsforce.
+// Questo file estende le definizioni dei tipi per jsforce, aggiungendo
+// metodi e proprietà mancanti per garantire la compatibilità con TypeScript.
 
-// Importiamo il modulo originale per poterlo estendere
-import 'jsforce';
+import { Connection, UserInfo, MetadataApi, ToolingApi } from 'jsforce';
 
-// Estendiamo il modulo 'jsforce'
 declare module 'jsforce' {
-  // Aggiungiamo le nostre definizioni all'interfaccia Connection
-  interface Connection {
-    // Dichiariamo che esiste una proprietà 'jwt'
-    jwt: {
-      // Dichiariamo che 'jwt' ha un metodo 'authorize'
-      authorize(
-        username: string, 
-        privateKey: string, 
-        callback?: (err: Error, result: any) => void
-      ): Promise<any>;
-    };
+
+  // Definiamo un'interfaccia per le opzioni del metodo forJwt
+  interface JwtOptions {
+    clientId: string;
+    privateKey: string;
+    username: string;
+    loginUrl?: string;
   }
 
-  // Aggiungiamo la proprietà 'username' mancante all'interfaccia UserInfo
+  // Estendiamo la classe Connection per aggiungere il metodo statico 'forJwt'
+  // e tutte le proprietà di istanza che utilizziamo.
+  export class Connection {
+    /**
+     * Crea e autentica una connessione usando il flusso JWT Bearer Token.
+     * Questo metodo statico è mancante nelle definizioni di tipo standard per jsforce v3.
+     */
+    static forJwt(options: JwtOptions): Promise<Connection>;
+
+    // --- PROPRIETÀ DI ISTANZA MANCANTI ---
+    
+    /**
+     * Fornisce informazioni sull'utente autenticato.
+     */
+    userInfo?: UserInfo;
+
+    /**
+     * Fornisce accesso all'API Metadata di Salesforce.
+     */
+    metadata: MetadataApi;
+
+    /**
+     * Fornisce accesso all'API Tooling di Salesforce.
+     */
+    tooling: ToolingApi;
+  }
+
+  // Aggiunge la proprietà 'username' mancante all'interfaccia UserInfo
   interface UserInfo {
+    id: string;
+    organizationId: string;
+    url: string;
     username: string;
   }
 }
+

@@ -1,4 +1,4 @@
-import jsforce from 'jsforce';
+import { Connection } from 'jsforce';
 import {
     CreateCustomFieldRequest,
     CreateCustomObjectRequest,
@@ -11,7 +11,6 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Funzione per ottenere le credenziali in modo sicuro
 function getCredentials(): SalesforceCredentials {
     const {
         SF_LOGIN_URL,
@@ -28,29 +27,26 @@ function getCredentials(): SalesforceCredentials {
         loginUrl: SF_LOGIN_URL,
         consumerKey: SF_CONSUMER_KEY,
         username: SF_USERNAME,
-        privateKey: SF_PRIVATE_KEY.replace(/\\n/g, '\n') // Sostituisce i caratteri di escape
+        privateKey: SF_PRIVATE_KEY.replace(/\\n/g, '\n')
     };
 }
 
-// Funzione per stabilire la connessione
-export async function getSalesforceConnection(): Promise<jsforce.Connection> {
+export async function getSalesforceConnection(): Promise<Connection> {
     const creds = getCredentials();
-    
-    // Crea una nuova istanza di connessione
-    const conn = new jsforce.Connection({
-        oauth2: {
-            loginUrl: creds.loginUrl,
-            clientId: creds.consumerKey,
-        },
-        instanceUrl: creds.loginUrl // Importante per il flusso JWT
-    });
 
     try {
-        // Usa il metodo di autorizzazione JWT corretto. 
-        // TypeScript lo riconoscerà grazie al file jsforce.d.ts
-        await conn.jwt.authorize(creds.username, creds.privateKey);
+        // Utilizza il metodo factory statico Connection.forJwt(), come da documentazione v3.
+        // Questo metodo gestisce la creazione e l'autenticazione in un unico passaggio.
+        const conn = await Connection.forJwt({
+            clientId: creds.consumerKey,
+            privateKey: creds.privateKey,
+            username: creds.username,
+            loginUrl: creds.loginUrl
+        });
+
+        const username = conn.userInfo ? conn.userInfo.username : 'utente sconosciuto';
+        console.log(`Connessione a Salesforce stabilita con successo per l'utente: ${username}`);
         
-        console.log(`Connessione a Salesforce stabilita con successo per l'utente: ${conn.userInfo?.username}`);
         return conn;
     } catch (err: any) {
         console.error("Errore durante l'autorizzazione JWT a Salesforce:", err.message);
@@ -59,7 +55,7 @@ export async function getSalesforceConnection(): Promise<jsforce.Connection> {
 }
 
 // Strumento per creare un Custom Object
-export async function createCustomObject(conn: jsforce.Connection, params: CreateCustomObjectRequest): Promise<any> {
+export async function createCustomObject(conn: Connection, params: CreateCustomObjectRequest): Promise<any> {
     const metadata = [{
         fullName: `${params.apiName}__c`,
         label: params.label,
@@ -75,7 +71,7 @@ export async function createCustomObject(conn: jsforce.Connection, params: Creat
 }
 
 // Strumento per creare un Custom Field
-export async function createCustomField(conn: jsforce.Connection, params: CreateCustomFieldRequest): Promise<any> {
+export async function createCustomField(conn: Connection, params: CreateCustomFieldRequest): Promise<any> {
     const metadata = [{
         fullName: `${params.objectApiName}.${params.fieldApiName.replace('__c','')}__c`,
         label: params.label,
@@ -86,23 +82,21 @@ export async function createCustomField(conn: jsforce.Connection, params: Create
 }
 
 // Strumento per creare una Classe Apex
-export async function createApexClass(conn: jsforce.Connection, params: CreateApexClassRequest): Promise<any> {
+export async function createApexClass(conn: Connection, params: CreateApexClassRequest): Promise<any> {
      const metadata = {
         apiVersion: params.apiVersion || 59.0,
         status: 'Active',
         body: params.body
     };
     const fullName = params.className;
-    // L'API Tooling richiede un approccio leggermente diverso
     return conn.tooling.sobject('ApexClass').create({ FullName: fullName, ...metadata });
 }
 
 
-// Strumento per creare un Lightning Web Component (Implementazione Reale e Completa)
-export async function createLWC(conn: jsforce.Connection, params: CreateLWCRequest): Promise<any> {
+// Strumento per creare un Lightning Web Component (Implementazione Reale)
+export async function createLWC(conn: Connection, params: CreateLWCRequest): Promise<any> {
     console.log("Inizio creazione LWC reale per:", params.componentName);
 
-    // 1. Creare il LightningComponentBundle (il "contenitore")
     const bundleMetadata = {
         FullName: params.componentName,
         ApiVersion: params.apiVersion || 59.0,
@@ -117,18 +111,14 @@ export async function createLWC(conn: jsforce.Connection, params: CreateLWCReque
     try {
         bundleResult = await conn.tooling.sobject('LightningComponentBundle').create(bundleMetadata);
         if (!bundleResult.success || !bundleResult.id) {
-            // Se la creazione del bundle fallisce, lancia un errore chiaro
             throw new Error(`Creazione del bundle fallita: ${JSON.stringify(bundleResult)}`);
         }
-        console.log("LightningComponentBundle creato con successo. ID:", bundleResult.id);
     } catch (error: any) {
         console.error("Errore durante la creazione del LightningComponentBundle:", error.message);
         throw error;
     }
 
     const bundleId = bundleResult.id;
-
-    // 2. Generare dinamicamente il contenuto del file .js-meta.xml
     const metaXmlContent = `<?xml version="1.0" encoding="UTF-8"?>
 <LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
     <apiVersion>${params.apiVersion || 59.0}</apiVersion>
@@ -139,27 +129,13 @@ export async function createLWC(conn: jsforce.Connection, params: CreateLWCReque
     </targets>
 </LightningComponentBundle>`;
 
-    // 3. Definire le risorse (i file) da associare al bundle
     const resources = [
-        {
-            FilePath: `lwc/${params.componentName}/${params.componentName}.html`,
-            Format: 'HTML',
-            Source: params.htmlContent
-        },
-        {
-            FilePath: `lwc/${params.componentName}/${params.componentName}.js`,
-            Format: 'JavaScript',
-            Source: params.jsContent
-        },
-        {
-            FilePath: `lwc/${params.componentName}/${params.componentName}.js-meta.xml`,
-            Format: 'XML',
-            Source: metaXmlContent
-        }
+        { FilePath: `lwc/${params.componentName}/${params.componentName}.html`, Format: 'HTML', Source: params.htmlContent },
+        { FilePath: `lwc/${params.componentName}/${params.componentName}.js`, Format: 'JavaScript', Source: params.jsContent },
+        { FilePath: `lwc/${params.componentName}/${params.componentName}.js-meta.xml`, Format: 'XML', Source: metaXmlContent }
     ];
 
     try {
-        // 4. Creare le singole risorse in parallelo per efficienza
         const resourceCreationPromises = resources.map(resource => 
             conn.tooling.sobject('LightningComponentResource').create({
                 LightningComponentBundleId: bundleId,
@@ -167,34 +143,23 @@ export async function createLWC(conn: jsforce.Connection, params: CreateLWCReque
             })
         );
         
-        const creationResults = await Promise.all(resourceCreationPromises);
-
-        // Controllare se tutte le chiamate hanno avuto successo
-        const failures = creationResults.filter(r => !r.success);
-        if (failures.length > 0) {
-            throw new Error(`Creazione di una o più risorse LWC fallita: ${JSON.stringify(failures)}`);
-        }
-
-        console.log("Tutte le risorse del LWC sono state create con successo.");
+        await Promise.all(resourceCreationPromises);
         return { success: true, message: `Componente LWC '${params.componentName}' creato con successo.` };
 
     } catch (error: any) {
         console.error("Errore durante la creazione delle risorse LWC:", error.message);
-        
-        // 5. Tentativo di Rollback: se la creazione delle risorse fallisce, cancelliamo il bundle
         try {
             await conn.tooling.sobject('LightningComponentBundle').delete(bundleId);
-            console.log("Rollback eseguito: LightningComponentBundle cancellato per pulizia.");
         } catch (rollbackError: any) {
             console.error("Errore critico durante il rollback del bundle:", rollbackError.message);
         }
-        throw error; // Rilancia l'errore originale dopo il tentativo di pulizia
+        throw error;
     }
 }
 
 
 // Strumento per aggiornare i permessi di un campo
-export async function updateFieldPermissions(conn: jsforce.Connection, params: UpdatePermissionsRequest): Promise<any> {
+export async function updateFieldPermissions(conn: Connection, params: UpdatePermissionsRequest): Promise<any> {
     const metadata = [{
         fullName: params.profileName,
         fieldPermissions: [{
