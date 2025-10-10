@@ -183,20 +183,18 @@ export class MetadataService {
                 { FilePath: `lwc/${params.componentName}/${params.componentName}.js-meta.xml`, Format: 'XML', Source: metaXmlContent }
             ];
 
-            // Passo 3: Crea o aggiorna le risorse in modo sequenziale.
+            // Passo 3: Crea o aggiorna le risorse, associandole al container.
             for (const resource of resources) {
                 console.log(`[LWCDeployer] Creazione/Aggiornamento risorsa: ${resource.FilePath}`);
                 await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentResource', {
-                    LightningComponentBundleId: bundleId, ...resource
+                    LightningComponentBundleId: bundleId,
+                    MetadataContainerId: containerId, // Associazione al container avviene qui
+                    ...resource
                 });
             }
+            console.log(`[LWCDeployer] Tutte le risorse sono state create e associate al container.`);
             
-            // Passo 4: Associa il bundle completato al container.
-            await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentBundleMember', {
-                MetadataContainerId: containerId,
-                ContentEntityId: bundleId
-            });
-            console.log(`[LWCDeployer] LightningComponentBundleMember creato e associato al container.`);
+            // Il Passo 4 (creazione di un ...Member) è stato rimosso perché errato.
 
             // Passo 5: Avvia il deploy asincrono.
             const deployRequest = await this.apiClient.toolingApi('post', '/tooling/sobjects/ContainerAsyncRequest', {
