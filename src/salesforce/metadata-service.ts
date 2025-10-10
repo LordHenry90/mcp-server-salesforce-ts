@@ -120,6 +120,8 @@ export class MetadataService {
      * Crea o aggiorna un Lightning Web Component (LWC).
      * Questo metodo orchestra il complesso processo di deploy di un LWC, che richiede
      * la gestione di un container di metadati e la creazione sequenziale di più risorse.
+     * È un esempio perfetto di come la Tooling API richieda un'orchestrazione precisa
+     * per metadati complessi composti da più file.
      * @param {CreateLWCRequest} params I parametri completi per la creazione del LWC.
      * @throws {Error} Se i parametri richiesti (`componentName`, `htmlContent`, `jsContent`, etc.) sono mancanti.
      * @throws {Error} Se il deploy del container fallisce.
@@ -147,7 +149,7 @@ export class MetadataService {
         console.log(`[LWCDeployer] Creato MetadataContainer temporaneo: ${containerName} (ID: ${containerId})`);
 
         try {
-            // Passo 1: Controlla se il bundle LWC esiste già.
+            // Passo 1: Controlla se il bundle LWC (il "contenitore" del componente) esiste già.
             const query = `SELECT Id FROM LightningComponentBundle WHERE DeveloperName = '${params.componentName}'`;
             const queryResult = await this.apiClient.toolingApi('get', `/tooling/query?q=${encodeURIComponent(query)}`);
             
@@ -156,6 +158,7 @@ export class MetadataService {
                 bundleId = queryResult.records[0].Id;
                 console.log(`[LWCDeployer] Bundle LWC '${params.componentName}' esistente trovato con ID: ${bundleId}.`);
             } else {
+                // Se non esiste, crea un nuovo bundle. Questa è un'operazione atomica.
                 const newBundle = await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentBundle', {
                     FullName: params.componentName,
                     Metadata: {
@@ -168,7 +171,7 @@ export class MetadataService {
                 console.log(`[LWCDeployer] Nuovo bundle LWC '${params.componentName}' creato con ID: ${bundleId}.`);
             }
             
-            // Passo 2: Prepara i contenuti dei file.
+            // Passo 2: Prepara i contenuti dei singoli file che compongono l'LWC.
             const metaXmlContent = `<?xml version="1.0" encoding="UTF-8"?>
 <LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
     <apiVersion>${params.apiVersion || 59.0}</apiVersion>
@@ -183,27 +186,35 @@ export class MetadataService {
                 { FilePath: `lwc/${params.componentName}/${params.componentName}.js-meta.xml`, Format: 'XML', Source: metaXmlContent }
             ];
 
-            // Passo 3: Crea o aggiorna le risorse, associandole al container.
+            // Passo 3: Crea o aggiorna le risorse (i file) in modo sequenziale, associandole al bundle.
+            // A questo punto, NON le associamo ancora al container.
             for (const resource of resources) {
                 console.log(`[LWCDeployer] Creazione/Aggiornamento risorsa: ${resource.FilePath}`);
+                // Questa chiamata crea o aggiorna il file specifico.
                 await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentResource', {
-                    LightningComponentBundleId: bundleId,
-                    MetadataContainerId: containerId, // Associazione al container avviene qui
-                    ...resource
+                    LightningComponentBundleId: bundleId, ...resource
                 });
             }
-            console.log(`[LWCDeployer] Tutte le risorse sono state create e associate al container.`);
             
-            // Il Passo 4 (creazione di un ...Member) è stato rimosso perché errato.
+            // --- CORREZIONE DEFINITIVA ---
+            // Passo 4: Associa il bundle LWC (ora completo di tutte le sue risorse) al container di deploy.
+            // L'oggetto corretto per questa associazione è 'MetadataContainerMember'.
+            await this.apiClient.toolingApi('post', '/tooling/sobjects/MetadataContainerMember', {
+                MetadataContainerId: containerId,
+                ContentEntityId: bundleId,
+                Body: '' // Per gli LWC, il corpo è gestito dalle risorse, quindi può essere vuoto.
+            });
+            console.log(`[LWCDeployer] MetadataContainerMember creato. Il bundle è ora associato al container.`);
+            // --- FINE CORREZIONE ---
 
-            // Passo 5: Avvia il deploy asincrono.
+            // Passo 5: Avvia il deploy asincrono del container, che ora contiene il riferimento al nostro LWC.
             const deployRequest = await this.apiClient.toolingApi('post', '/tooling/sobjects/ContainerAsyncRequest', {
                 MetadataContainerId: containerId,
                 IsCheckOnly: false
             });
             console.log(`[LWCDeployer] Richiesta di deploy asincrono inviata. ID Deploy: ${deployRequest.id}`);
 
-            // Passo 6: Attendi il completamento.
+            // Passo 6: Attendi il completamento del deploy tramite polling.
             const deployResult = await this.pollDeployStatus(deployRequest.id, 60);
 
             if (deployResult.State !== 'Completed') {
@@ -216,7 +227,8 @@ export class MetadataService {
             console.log(`[LWCDeployer] Deploy del componente LWC '${params.componentName}' completato con successo.`);
             return { success: true, message: `Componente LWC '${params.componentName}' creato/aggiornato con successo.` };
         } finally {
-            // Passo 7: Pulizia del container.
+            // Passo 7: Pulizia finale del container. Questa operazione è fondamentale per non
+            // lasciare "spazzatura" nell'organizzazione Salesforce.
             await this.apiClient.toolingApi('delete', `/tooling/sobjects/MetadataContainer/${containerId}`);
             console.log(`[LWCDeployer] Pulizia: MetadataContainer ${containerName} cancellato.`);
         }
@@ -229,6 +241,8 @@ export class MetadataService {
      * attendendo uno stato finale (Completed, Failed, etc.) o il timeout.
      * Questo approccio previene le "race conditions", garantendo che un'operazione
      * sia effettivamente conclusa prima di procedere con la successiva.
+     * La funzione include un logging dettagliato per tracciare l'avanzamento del deploy,
+     * che è fondamentale per il debug in ambienti di produzione.
      * @private
      * @param {string} deployId L'ID del ContainerAsyncRequest da monitorare.
      * @param {number} [timeoutSeconds=30] Il numero massimo di secondi da attendere.
@@ -249,6 +263,7 @@ export class MetadataService {
                 console.log(`[Polling] Monitoraggio terminato. Stato finale: ${deployResult.State}.`);
                 return deployResult;
             }
+            // Attendi un secondo prima del prossimo controllo per non sovraccaricare l'API.
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
