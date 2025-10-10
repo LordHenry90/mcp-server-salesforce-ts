@@ -38,7 +38,7 @@ export class MetadataService {
      * garantendo che le operazioni successive possano fare affidamento su questo deploy.
      * 7. Il container temporaneo viene sempre cancellato, sia in caso di successo che di fallimento,
      * per non lasciare residui nell'organizzazione Salesforce.
-     * * @param {CreateApexClassRequest} params I parametri per la creazione/aggiornamento della classe Apex.
+     * @param {CreateApexClassRequest} params I parametri per la creazione/aggiornamento della classe Apex.
      * @throws {Error} Se i parametri richiesti (`className`, `body`) sono mancanti o non validi.
      * @throws {Error} Se il deploy asincrono fallisce o va in timeout.
      * @returns {Promise<any>} Un oggetto che indica il successo dell'operazione e un messaggio descrittivo.
@@ -70,6 +70,7 @@ export class MetadataService {
             if (queryResult.records.length > 0) {
                 classId = queryResult.records[0].Id;
                 console.log(`[ApexDeployer] Classe '${params.className}' trovata con ID: ${classId}. Verrà aggiornata.`);
+                // L'aggiornamento effettivo del codice avviene tramite l'ApexClassMember.
             } else {
                 console.log(`[ApexDeployer] Classe '${params.className}' non trovata. Verrà creata.`);
                 const newClass = await this.apiClient.toolingApi('post', '/tooling/sobjects/ApexClass', {
@@ -81,7 +82,7 @@ export class MetadataService {
                 console.log(`[ApexDeployer] Nuova classe creata con ID: ${classId}.`);
             }
 
-            // Passo 2: Aggiunge la classe al container per il deploy.
+            // Passo 2: Aggiunge la classe (nuova o esistente) al container per il deploy.
             await this.apiClient.toolingApi('post', '/tooling/sobjects/ApexClassMember', {
                 MetadataContainerId: containerId,
                 ContentEntityId: classId,
@@ -117,9 +118,9 @@ export class MetadataService {
 
     /**
      * Crea o aggiorna un Lightning Web Component (LWC).
-     * Questo metodo orchestra il complesso processo di deploy di un LWC, gestendo
-     * la creazione sequenziale di più risorse all'interno di un container di metadati.
-     * * @param {CreateLWCRequest} params I parametri completi per la creazione del LWC.
+     * Questo metodo orchestra il complesso processo di deploy di un LWC, che richiede
+     * la gestione di un container di metadati e la creazione sequenziale di più risorse.
+     * @param {CreateLWCRequest} params I parametri completi per la creazione del LWC.
      * @throws {Error} Se i parametri richiesti (`componentName`, `htmlContent`, `jsContent`, etc.) sono mancanti.
      * @throws {Error} Se il deploy del container fallisce.
      * @returns {Promise<any>} Un oggetto che indica il successo e un messaggio descrittivo.
@@ -182,7 +183,7 @@ export class MetadataService {
                 { FilePath: `lwc/${params.componentName}/${params.componentName}.js-meta.xml`, Format: 'XML', Source: metaXmlContent }
             ];
 
-            // Passo 3: Crea o aggiorna le risorse in modo sequenziale per garantire l'ordine corretto.
+            // Passo 3: Crea o aggiorna le risorse in modo sequenziale.
             for (const resource of resources) {
                 console.log(`[LWCDeployer] Creazione/Aggiornamento risorsa: ${resource.FilePath}`);
                 await this.apiClient.toolingApi('post', '/tooling/sobjects/LightningComponentResource', {
@@ -230,7 +231,7 @@ export class MetadataService {
      * attendendo uno stato finale (Completed, Failed, etc.) o il timeout.
      * Questo approccio previene le "race conditions", garantendo che un'operazione
      * sia effettivamente conclusa prima di procedere con la successiva.
-     * * @private
+     * @private
      * @param {string} deployId L'ID del ContainerAsyncRequest da monitorare.
      * @param {number} [timeoutSeconds=30] Il numero massimo di secondi da attendere.
      * @returns {Promise<any>} L'oggetto finale del risultato del deploy.
@@ -250,7 +251,6 @@ export class MetadataService {
                 console.log(`[Polling] Monitoraggio terminato. Stato finale: ${deployResult.State}.`);
                 return deployResult;
             }
-            // Attendi un secondo prima del prossimo controllo per non sovraccaricare l'API.
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
