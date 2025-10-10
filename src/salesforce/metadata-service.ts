@@ -70,6 +70,7 @@ export class MetadataService {
             if (queryResult.records.length > 0) {
                 classId = queryResult.records[0].Id;
                 console.log(`[ApexDeployer] Classe '${params.className}' trovata con ID: ${classId}. Verrà aggiornata.`);
+                // L'aggiornamento effettivo del codice avviene tramite l'ApexClassMember.
             } else {
                 console.log(`[ApexDeployer] Classe '${params.className}' non trovata. Verrà creata.`);
                 const newClass = await this.apiClient.toolingApi('post', '/tooling/sobjects/ApexClass', {
@@ -81,11 +82,11 @@ export class MetadataService {
                 console.log(`[ApexDeployer] Nuova classe creata con ID: ${classId}.`);
             }
 
-            // Passo 2: Aggiunge la classe al container per il deploy.
+            // Passo 2: Aggiunge la classe (nuova o esistente) al container per il deploy.
             await this.apiClient.toolingApi('post', '/tooling/sobjects/ApexClassMember', {
                 MetadataContainerId: containerId,
                 ContentEntityId: classId,
-                Body: params.body
+                Body: params.body // Il corpo del codice è sempre necessario per l'operazione di deploy.
             });
             console.log(`[ApexDeployer] ApexClassMember creato e associato al container.`);
 
@@ -204,8 +205,13 @@ export class MetadataService {
 
     /**
      * Esegue il polling dello stato di un ContainerAsyncRequest.
-     * Questa funzione ausiliaria è essenziale per gestire la natura asincrona delle API di deploy
-     * per i metadati che lo richiedono (es. Classi Apex).
+     * Questa funzione ausiliaria è essenziale per gestire la natura asincrona delle API di deploy.
+     * Interroga ciclicamente Salesforce per verificare lo stato di un'operazione,
+     * attendendo uno stato finale (Completed, Failed, etc.) o il timeout.
+     * Questo approccio previene le "race conditions", garantendo che un'operazione
+     * sia effettivamente conclusa prima di procedere con la successiva.
+     * La funzione include un logging dettagliato per tracciare l'avanzamento del deploy,
+     * che è fondamentale per il debug in ambienti di produzione.
      * @private
      * @param {string} deployId L'ID del ContainerAsyncRequest da monitorare.
      * @param {number} [timeoutSeconds=30] Il numero massimo di secondi da attendere.
