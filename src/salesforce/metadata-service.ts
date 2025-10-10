@@ -201,8 +201,7 @@ export class MetadataService {
             // L'oggetto corretto per questa associazione è 'MetadataContainerMember'.
             await this.apiClient.toolingApi('post', '/tooling/sobjects/MetadataContainerMember', {
                 MetadataContainerId: containerId,
-                ContentEntityId: bundleId,
-                Body: '' // Per gli LWC, il corpo è gestito dalle risorse, quindi può essere vuoto.
+                ContentEntityId: bundleId
             });
             console.log(`[LWCDeployer] MetadataContainerMember creato. Il bundle è ora associato al container.`);
             // --- FINE CORREZIONE ---
